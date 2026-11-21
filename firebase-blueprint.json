@@ -1,0 +1,440 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "Classroom Dingo game session created by a teacher with 16 uploaded cards and 2 to 7 groups.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "description": "6-character alphanumeric room join code.",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Classroom session title.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "teacherUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the teacher who owns this room.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "totalGroups": {
+          "type": "integer",
+          "description": "Number of student groups (2 to 7)."
+        },
+        "status": {
+          "type": "string",
+          "description": "Current room lifecycle state.",
+          "enum": ["LOBBY", "PLAYING", "ENDED"]
+        },
+        "cardCount": {
+          "type": "integer",
+          "description": "Total number of cards in the Dingo deck (16)."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "roomCode",
+        "title",
+        "teacherUid",
+        "totalGroups",
+        "status",
+        "cardCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "RoomPass": {
+      "title": "RoomPass",
+      "description": "SHA-256 room password verification marker stored by hash ID.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["roomId", "teacherUid", "createdAt"]
+    },
+    "TeacherSecret": {
+      "title": "TeacherSecret",
+      "description": "Teacher-only room access password record.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "joinPassword": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 30
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["roomId", "teacherUid", "joinPassword", "updatedAt"]
+    },
+    "DingoCard": {
+      "title": "DingoCard",
+      "description": "One of the 16 sliced Dingo cards belonging to a classroom room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Card index 0 to 15."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "groupTag": {
+          "type": "integer",
+          "description": "Row/set hint 1 to 4."
+        },
+        "imageDataUrl": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 350000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomId",
+        "teacherUid",
+        "index",
+        "label",
+        "groupTag",
+        "imageDataUrl",
+        "createdAt"
+      ]
+    },
+    "DingoGroup": {
+      "title": "DingoGroup",
+      "description": "State of a single student group (모둠) within a room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "groupNumber": {
+          "type": "integer"
+        },
+        "roundNumber": {
+          "type": "integer"
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["LOBBY", "VIEWING", "DISCARDING", "PICKING", "DINGO_WON"]
+        },
+        "hostPlayerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "hostIndex": {
+          "type": "integer"
+        },
+        "activePlayerIds": {
+          "type": "array",
+          "description": "Up to 5 active card-holding player document IDs."
+        },
+        "centerCardIds": {
+          "type": "array",
+          "description": "Shuffled discarded card indices placed face-down in center."
+        },
+        "centerClaimedBy": {
+          "type": "array",
+          "description": "Parallel array tracking who claimed each center card slot."
+        },
+        "winnerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "winnerNickname": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "winningHand": {
+          "type": "array",
+          "description": "4 winning card indices shown upon Dingo."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomId",
+        "teacherUid",
+        "groupNumber",
+        "roundNumber",
+        "phase",
+        "hostPlayerId",
+        "hostIndex",
+        "activePlayerIds",
+        "centerCardIds",
+        "centerClaimedBy",
+        "winnerId",
+        "winnerNickname",
+        "winningHand",
+        "updatedAt"
+      ]
+    },
+    "GroupPlayer": {
+      "title": "GroupPlayer",
+      "description": "Public seat metadata of a student or practice bot participating in a group (card faces are isolated).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "groupNumber": {
+          "type": "integer"
+        },
+        "isBot": {
+          "type": "boolean"
+        },
+        "nickname": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24
+        },
+        "seatOrder": {
+          "type": "integer"
+        },
+        "handCount": {
+          "type": "integer",
+          "description": "Number of cards currently held (0 to 4)."
+        },
+        "hasDiscarded": {
+          "type": "boolean",
+          "description": "Whether this player has discarded a card this turn."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "roomId",
+        "groupNumber",
+        "isBot",
+        "nickname",
+        "seatOrder",
+        "handCount",
+        "hasDiscarded",
+        "updatedAt"
+      ]
+    },
+    "PlayerHand": {
+      "title": "PlayerHand",
+      "description": "Private card hand held by a single player, isolated from public player listings.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "groupNumber": {
+          "type": "integer"
+        },
+        "playerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hand": {
+          "type": "array",
+          "description": "0 to 4 card indices currently held by this player."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomId",
+        "teacherUid",
+        "groupNumber",
+        "playerId",
+        "hand",
+        "updatedAt"
+      ]
+    },
+    "DiscardSlot": {
+      "title": "DiscardSlot",
+      "description": "Face-down discarded card submitted by an active player during DISCARDING phase.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 10,
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "teacherUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "groupNumber": {
+          "type": "integer"
+        },
+        "playerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "cardIndex": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomId",
+        "teacherUid",
+        "groupNumber",
+        "playerId",
+        "cardIndex",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": {
+        "$ref": "#/entities/Room"
+      },
+      "description": "Top-level classroom Dingo game rooms."
+    },
+    "/rooms/{roomId}/passes/{passHash}": {
+      "schema": {
+        "$ref": "#/entities/RoomPass"
+      },
+      "description": "Hashed room password check document."
+    },
+    "/rooms/{roomId}/teacherSecret/{secretId}": {
+      "schema": {
+        "$ref": "#/entities/TeacherSecret"
+      },
+      "description": "Teacher-only plaintext room password storage."
+    },
+    "/rooms/{roomId}/cards/{cardId}": {
+      "schema": {
+        "$ref": "#/entities/DingoCard"
+      },
+      "description": "16 sliced Dingo cards for the room."
+    },
+    "/rooms/{roomId}/groups/{groupId}": {
+      "schema": {
+        "$ref": "#/entities/DingoGroup"
+      },
+      "description": "Per-group game state and round progression."
+    },
+    "/rooms/{roomId}/groups/{groupId}/players/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/GroupPlayer"
+      },
+      "description": "Public seat metadata for joined students in a group."
+    },
+    "/rooms/{roomId}/groups/{groupId}/playerHands/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerHand"
+      },
+      "description": "Private player hands isolated from group player listings."
+    },
+    "/rooms/{roomId}/groups/{groupId}/discardSlots/{playerId}": {
+      "schema": {
+        "$ref": "#/entities/DiscardSlot"
+      },
+      "description": "Face-down discarded card slots pending center shuffle."
+    }
+  }
+}

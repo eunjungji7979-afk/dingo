@@ -1,0 +1,490 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: deny everything by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() >= 4 && code.size() <= 10 && code.matches('^[A-Z0-9]+$');
+    }
+
+    function isRoomTeacher(roomId) {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherUid == request.auth.uid;
+    }
+
+    // --- Validation Blueprints ---
+    function isValidRoom(data) {
+      return data.keys().hasAll([
+        'roomCode', 'title', 'teacherUid', 'totalGroups', 'status', 'cardCount', 'createdAt', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'roomCode', 'title', 'teacherUid', 'totalGroups', 'status', 'cardCount', 'createdAt', 'updatedAt'
+      ])
+      && isValidRoomCode(data.roomCode)
+      && data.title is string && data.title.size() >= 1 && data.title.size() <= 80
+      && isValidId(data.teacherUid)
+      && data.totalGroups is int && data.totalGroups >= 2 && data.totalGroups <= 7
+      && data.status in ['LOBBY', 'PLAYING', 'ENDED']
+      && data.cardCount is int && data.cardCount == 16
+      && data.createdAt is timestamp
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidRoomPass(data, roomId) {
+      return data.keys().hasAll(['roomId', 'teacherUid', 'createdAt'])
+      && data.keys().hasOnly(['roomId', 'teacherUid', 'createdAt'])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.createdAt is timestamp;
+    }
+
+    function isValidTeacherSecret(data, roomId) {
+      return data.keys().hasAll(['roomId', 'teacherUid', 'joinPassword', 'updatedAt'])
+      && data.keys().hasOnly(['roomId', 'teacherUid', 'joinPassword', 'updatedAt'])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.joinPassword is string && data.joinPassword.size() >= 1 && data.joinPassword.size() <= 30
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidCard(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'teacherUid', 'index', 'label', 'groupTag', 'imageDataUrl', 'createdAt'
+      ])
+      && data.keys().hasOnly([
+        'roomId', 'teacherUid', 'index', 'label', 'groupTag', 'imageDataUrl', 'createdAt'
+      ])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.index is int && data.index >= 0 && data.index <= 15
+      && data.label is string && data.label.size() >= 1 && data.label.size() <= 60
+      && data.groupTag is int && data.groupTag >= 1 && data.groupTag <= 4
+      && data.imageDataUrl is string && data.imageDataUrl.size() >= 10 && data.imageDataUrl.size() <= 350000
+      && data.createdAt is timestamp;
+    }
+
+    function isValidGroup(data, roomId) {
+      return data.keys().hasAll([
+        'roomId', 'teacherUid', 'groupNumber', 'roundNumber', 'phase',
+        'hostPlayerId', 'hostIndex', 'activePlayerIds',
+        'centerCardIds', 'centerClaimedBy',
+        'winnerId', 'winnerNickname', 'winningHand', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'roomId', 'teacherUid', 'groupNumber', 'roundNumber', 'phase',
+        'hostPlayerId', 'hostIndex', 'activePlayerIds',
+        'centerCardIds', 'centerClaimedBy',
+        'winnerId', 'winnerNickname', 'winningHand', 'updatedAt'
+      ])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.groupNumber is int && data.groupNumber >= 1 && data.groupNumber <= 7
+      && data.roundNumber is int && data.roundNumber >= 0 && data.roundNumber <= 999
+      && data.phase in ['LOBBY', 'VIEWING', 'DISCARDING', 'PICKING', 'DINGO_WON']
+      && data.hostPlayerId is string && data.hostPlayerId.size() <= 128
+      && data.hostIndex is int && data.hostIndex >= 0 && data.hostIndex <= 10
+      && data.activePlayerIds is list && data.activePlayerIds.size() <= 5
+      && (data.activePlayerIds.size() == 0 || (data.activePlayerIds[0] is string && data.activePlayerIds[0].size() <= 128))
+      && data.centerCardIds is list && data.centerCardIds.size() <= 5
+      && (data.centerCardIds.size() == 0 || (data.centerCardIds[0] is int && data.centerCardIds[0] >= 0 && data.centerCardIds[0] <= 15))
+      && data.centerClaimedBy is list && data.centerClaimedBy.size() <= 5
+      && (data.centerClaimedBy.size() == 0 || (data.centerClaimedBy[0] is string && data.centerClaimedBy[0].size() <= 128))
+      && data.winnerId is string && data.winnerId.size() <= 128
+      && data.winnerNickname is string && data.winnerNickname.size() <= 30
+      && data.winningHand is list && data.winningHand.size() <= 4
+      && (data.winningHand.size() == 0 || (data.winningHand[0] is int && data.winningHand[0] >= 0 && data.winningHand[0] <= 15))
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPlayer(data, roomId, groupId) {
+      return data.keys().hasAll([
+        'uid', 'roomId', 'groupNumber', 'isBot', 'nickname', 'seatOrder', 'handCount', 'hasDiscarded', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'uid', 'roomId', 'groupNumber', 'isBot', 'nickname', 'seatOrder', 'handCount', 'hasDiscarded', 'updatedAt'
+      ])
+      && isValidId(data.uid)
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && data.groupNumber is int && data.groupNumber >= 1 && data.groupNumber <= 7
+      && string(data.groupNumber) == groupId
+      && data.isBot is bool
+      && data.nickname is string && data.nickname.size() >= 1 && data.nickname.size() <= 24
+      && data.seatOrder is int && data.seatOrder >= 0 && data.seatOrder <= 9999999999999
+      && data.handCount is int && data.handCount >= 0 && data.handCount <= 4
+      && data.hasDiscarded is bool
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidPlayerHand(data, roomId, groupId, playerId) {
+      return data.keys().hasAll([
+        'roomId', 'teacherUid', 'groupNumber', 'playerId', 'hand', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'roomId', 'teacherUid', 'groupNumber', 'playerId', 'hand', 'updatedAt'
+      ])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.groupNumber is int && data.groupNumber >= 1 && data.groupNumber <= 7
+      && string(data.groupNumber) == groupId
+      && data.playerId == playerId
+      && isValidId(data.playerId)
+      && data.hand is list && data.hand.size() <= 4
+      && (data.hand.size() == 0 || (data.hand[0] is int && data.hand[0] >= 0 && data.hand[0] <= 15))
+      && data.updatedAt is timestamp;
+    }
+
+    function isValidDiscardSlot(data, roomId, groupId, playerId) {
+      return data.keys().hasAll([
+        'roomId', 'teacherUid', 'groupNumber', 'playerId', 'cardIndex', 'updatedAt'
+      ])
+      && data.keys().hasOnly([
+        'roomId', 'teacherUid', 'groupNumber', 'playerId', 'cardIndex', 'updatedAt'
+      ])
+      && data.roomId == roomId
+      && isValidRoomCode(data.roomId)
+      && isValidId(data.teacherUid)
+      && data.groupNumber is int && data.groupNumber >= 1 && data.groupNumber <= 7
+      && string(data.groupNumber) == groupId
+      && data.playerId == playerId
+      && isValidId(data.playerId)
+      && data.cardIndex is int && data.cardIndex >= 0 && data.cardIndex <= 15
+      && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /rooms/{roomId} {
+      // Students with the room link/code can inspect basic room metadata without Google Login
+      allow get: if isValidRoomCode(roomId);
+      allow list: if isVerifiedUser() && resource.data.teacherUid == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && isValidRoom(incoming())
+        && incoming().roomCode == roomId
+        && incoming().teacherUid == request.auth.uid
+        && incoming().status == 'LOBBY'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && isValidRoom(incoming())
+        && existing().teacherUid == request.auth.uid
+        && existing().status != 'ENDED'
+        && incoming().roomCode == existing().roomCode
+        && incoming().teacherUid == existing().teacherUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          incoming().diff(existing()).affectedKeys().hasOnly(['totalGroups', 'title', 'updatedAt'])
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && existing().teacherUid == request.auth.uid;
+
+      // Hashed password check docs (get by exact hash only; no listing)
+      match /passes/{passHash} {
+        allow get: if isValidRoomCode(roomId) && isValidId(passHash);
+        allow list: if false;
+
+        allow create, update: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(passHash)
+          && isValidRoomPass(incoming(), roomId)
+          && incoming().teacherUid == request.auth.uid
+          && incoming().createdAt == request.time
+          && isRoomTeacher(roomId);
+
+        allow delete: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(passHash)
+          && isRoomTeacher(roomId);
+      }
+
+      // Teacher-only plaintext room password view
+      match /teacherSecret/{secretId} {
+        allow get: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isRoomTeacher(roomId);
+        allow list: if false;
+
+        allow create, update: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(secretId)
+          && isValidTeacherSecret(incoming(), roomId)
+          && incoming().teacherUid == request.auth.uid
+          && incoming().updatedAt == request.time
+          && isRoomTeacher(roomId);
+
+        allow delete: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(secretId)
+          && isRoomTeacher(roomId);
+      }
+
+      // 16 Dingo Cards
+      match /cards/{cardId} {
+        allow get: if isValidRoomCode(roomId) && isValidId(cardId);
+        allow list: if resource.data.roomId == roomId;
+
+        allow create, update: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(cardId)
+          && isValidCard(incoming(), roomId)
+          && incoming().teacherUid == request.auth.uid
+          && string(incoming().index) == cardId
+          && incoming().createdAt == request.time
+          && isRoomTeacher(roomId);
+
+        allow delete: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(cardId)
+          && isRoomTeacher(roomId);
+      }
+
+      // Student Groups (1..7)
+      match /groups/{groupId} {
+        allow get: if isValidRoomCode(roomId) && isValidId(groupId);
+        allow list: if resource.data.roomId == roomId;
+
+        allow create: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(groupId)
+          && isValidGroup(incoming(), roomId)
+          && string(incoming().groupNumber) == groupId
+          && incoming().teacherUid == request.auth.uid
+          && incoming().updatedAt == request.time
+          && isRoomTeacher(roomId);
+
+        allow update: if isValidRoomCode(roomId)
+          && isValidId(groupId)
+          && isValidGroup(incoming(), roomId)
+          && incoming().roomId == existing().roomId
+          && incoming().teacherUid == existing().teacherUid
+          && incoming().groupNumber == existing().groupNumber
+          && incoming().updatedAt == request.time
+          && (
+            // Teacher full control within room
+            (isRoomTeacher(roomId) && incoming().diff(existing()).affectedKeys().hasOnly([
+              'roundNumber', 'phase', 'hostPlayerId', 'hostIndex', 'activePlayerIds',
+              'centerCardIds', 'centerClaimedBy', 'winnerId', 'winnerNickname', 'winningHand', 'updatedAt'
+            ]))
+            ||
+            // Action: Host triggers "버려!" (VIEWING -> DISCARDING)
+            (existing().phase == 'VIEWING'
+              && incoming().phase == 'DISCARDING'
+              && incoming().diff(existing()).affectedKeys().hasOnly(['phase', 'updatedAt']))
+            ||
+            // Action: Host triggers "집어!" (DISCARDING -> PICKING)
+            (existing().phase == 'DISCARDING'
+              && incoming().phase == 'PICKING'
+              && incoming().centerCardIds.size() == existing().activePlayerIds.size()
+              && incoming().centerClaimedBy.size() == existing().activePlayerIds.size()
+              && incoming().diff(existing()).affectedKeys().hasOnly(['phase', 'centerCardIds', 'centerClaimedBy', 'updatedAt']))
+            ||
+            // Action: Active player claims a center card slot in PICKING
+            (existing().phase == 'PICKING'
+              && incoming().phase in ['PICKING', 'VIEWING']
+              && incoming().centerClaimedBy.size() == existing().centerClaimedBy.size()
+              && incoming().diff(existing()).affectedKeys().hasOnly(['centerClaimedBy', 'phase', 'updatedAt']))
+            ||
+            // Action: Active player calls "딩고!"
+            (existing().phase in ['VIEWING', 'PICKING']
+              && incoming().phase == 'DINGO_WON'
+              && incoming().winnerId in existing().activePlayerIds
+              && incoming().winnerNickname.size() >= 1
+              && incoming().winningHand.size() == 4
+              && incoming().diff(existing()).affectedKeys().hasOnly(['phase', 'winnerId', 'winnerNickname', 'winningHand', 'updatedAt']))
+            ||
+            // Action: Host or Winner rotates host & starts next round (DINGO_WON -> VIEWING)
+            (existing().phase == 'DINGO_WON'
+              && incoming().phase == 'VIEWING'
+              && incoming().roundNumber == existing().roundNumber + 1
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'roundNumber', 'phase', 'hostPlayerId', 'hostIndex', 'activePlayerIds',
+                'centerCardIds', 'centerClaimedBy', 'winnerId', 'winnerNickname', 'winningHand', 'updatedAt'
+              ]))
+          );
+
+        allow delete: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(groupId)
+          && isRoomTeacher(roomId);
+
+        // Public seat metadata for players in a group (no card values stored here)
+        match /players/{playerId} {
+          allow get: if isValidRoomCode(roomId) && isValidId(groupId) && isValidId(playerId);
+          allow list: if resource.data.roomId == roomId;
+
+          allow create: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isValidPlayer(incoming(), roomId, groupId)
+            && incoming().updatedAt == request.time
+            && exists(/databases/$(database)/documents/rooms/$(roomId))
+            && (
+              // Student joining via room code + password (no Google Login required)
+              (incoming().uid == playerId
+                && incoming().isBot == false
+                && incoming().handCount == 0
+                && incoming().hasDiscarded == false)
+              ||
+              // Teacher adding a practice bot
+              (isRoomTeacher(roomId)
+                && incoming().uid == request.auth.uid
+                && incoming().isBot == true)
+            );
+
+          allow update: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isValidPlayer(incoming(), roomId, groupId)
+            && incoming().uid == existing().uid
+            && incoming().roomId == existing().roomId
+            && incoming().groupNumber == existing().groupNumber
+            && incoming().isBot == existing().isBot
+            && incoming().updatedAt == request.time
+            && (
+              // Teacher managing deal / bots / reset
+              (isRoomTeacher(roomId)
+                && incoming().diff(existing()).affectedKeys().hasOnly(['handCount', 'hasDiscarded', 'nickname', 'seatOrder', 'updatedAt']))
+              ||
+              // Student updating their own handCount & discard status during active discard/pick phases
+              (existing().isBot == false
+                && get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase in ['DISCARDING', 'PICKING']
+                && playerId in get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.activePlayerIds
+                && incoming().diff(existing()).affectedKeys().hasOnly(['handCount', 'hasDiscarded', 'updatedAt']))
+              ||
+              // Student updating their nickname while in LOBBY
+              (existing().isBot == false
+                && get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'LOBBY'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['nickname', 'updatedAt']))
+              ||
+              // Re-dealing hands atomically during DINGO_WON -> VIEWING transition
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DINGO_WON'
+                && getAfter(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'VIEWING'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['handCount', 'hasDiscarded', 'updatedAt']))
+            );
+
+          allow delete: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && (existing().isBot == false || isRoomTeacher(roomId));
+        }
+
+        // Private per-player hands (students cannot list other students' hands)
+        match /playerHands/{playerId} {
+          allow get: if isValidRoomCode(roomId) && isValidId(groupId) && isValidId(playerId);
+          allow list: if isVerifiedUser() && resource.data.teacherUid == request.auth.uid;
+
+          allow create: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isValidPlayerHand(incoming(), roomId, groupId, playerId)
+            && incoming().updatedAt == request.time
+            && (
+              isRoomTeacher(roomId)
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DINGO_WON'
+                && getAfter(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'VIEWING')
+            );
+
+          allow update: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isValidPlayerHand(incoming(), roomId, groupId, playerId)
+            && incoming().roomId == existing().roomId
+            && incoming().teacherUid == existing().teacherUid
+            && incoming().groupNumber == existing().groupNumber
+            && incoming().playerId == existing().playerId
+            && incoming().updatedAt == request.time
+            && (
+              (isRoomTeacher(roomId)
+                && incoming().diff(existing()).affectedKeys().hasOnly(['hand', 'updatedAt']))
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase in ['DISCARDING', 'PICKING']
+                && playerId in get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.activePlayerIds
+                && incoming().diff(existing()).affectedKeys().hasOnly(['hand', 'updatedAt']))
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DINGO_WON'
+                && getAfter(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'VIEWING'
+                && incoming().diff(existing()).affectedKeys().hasOnly(['hand', 'updatedAt']))
+            );
+
+          allow delete: if isVerifiedUser()
+            && isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isRoomTeacher(roomId);
+        }
+
+        // Face-down discarded card slots (cleared when host triggers "집어!")
+        match /discardSlots/{playerId} {
+          allow get: if isValidRoomCode(roomId) && isValidId(groupId) && isValidId(playerId);
+          allow list: if isVerifiedUser() && resource.data.teacherUid == request.auth.uid;
+
+          allow create, update: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && isValidDiscardSlot(incoming(), roomId, groupId, playerId)
+            && incoming().updatedAt == request.time
+            && (
+              isRoomTeacher(roomId)
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DISCARDING'
+                && playerId in get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.activePlayerIds)
+            );
+
+          allow delete: if isValidRoomCode(roomId)
+            && isValidId(groupId)
+            && isValidId(playerId)
+            && (
+              isRoomTeacher(roomId)
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DISCARDING'
+                && getAfter(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'PICKING')
+              ||
+              (get(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'DINGO_WON'
+                && getAfter(/databases/$(database)/documents/rooms/$(roomId)/groups/$(groupId)).data.phase == 'VIEWING')
+            );
+        }
+      }
+    }
+  }
+}
